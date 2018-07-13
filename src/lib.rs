@@ -18,9 +18,9 @@ use std::ops::{Mul, Sub, Add};
 use std::sync::{Arc, Mutex};
 
 pub struct SrpVerifier {
-    username: String,
-    verifier: BigUint,
-    salt: BigUint,
+    pub username: String,
+    pub verifier: BigUint,
+    pub salt: BigUint,
     _n: BigUint,
     _g: BigUint,
     _k: BigUint,
@@ -64,14 +64,6 @@ impl SrpVerifier {
             _k: big_k,
             _rng: Arc::new(Mutex::new(rng)),
         }
-    }
-
-    pub fn base64_verifier(&self) -> String {
-        base64::encode(self.verifier.to_bytes_be().as_slice())
-    }
-
-    pub fn base64_salt(&self) -> String {
-        base64::encode(self.salt.to_bytes_be().as_slice())
     }
 
     pub fn session_token_client(&self) -> (BigUint, BigUint) {
