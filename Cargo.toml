@@ -1,5 +1,5 @@
 [package]
-name = "srp-rust"
+name = "srp"
 version = "0.1.0"
 authors = ["Michael Micucci <michael.micucci@exchange.co.jp>"]
 
