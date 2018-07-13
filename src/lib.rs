@@ -16,7 +16,6 @@ use num_bigint::BigUint;
 use rand::{ThreadRng, Rng};
 use rustc_serialize::hex::FromHex;
 use std::ops::{Mul, Sub, Add};
-use std::sync::{Arc, Mutex};
 
 pub struct SrpVerifier {
     pub username: String,
@@ -25,11 +24,10 @@ pub struct SrpVerifier {
     _n: BigUint,
     _g: BigUint,
     _k: BigUint,
-    _rng: Arc<Mutex<ThreadRng>>,
 }
 
 impl SrpVerifier {
-    pub fn new(user: String, pass: String, mut rng: ThreadRng, g: u32) -> SrpVerifier {
+    pub fn new(user: String, pass: String, rng: &mut ThreadRng, g: u32) -> SrpVerifier {
         let n = HexString(
             "00c037c37588b4329887e61c2da3324b
              1ba4b81a63f9748fed2d8a410c2fc21b
@@ -43,7 +41,7 @@ impl SrpVerifier {
 
         let big_n = BigUint::from_bytes_be(n.from_hex().unwrap().as_slice());
 
-        let salt_hex = pad_hex(BigUint::from_bytes_be(gen_rand_bytes(16, &mut rng).as_slice()));
+        let salt_hex = pad_hex(BigUint::from_bytes_be(gen_rand_bytes(16, rng).as_slice()));
         let big_salt = BigUint::from_bytes_be(salt_hex.from_hex().unwrap().as_slice());
 
         let x_hash = hash_pass(user.clone(), pass, big_salt.clone());
@@ -63,17 +61,16 @@ impl SrpVerifier {
             _g: big_g,
             _n: big_n,
             _k: big_k,
-            _rng: Arc::new(Mutex::new(rng)),
         }
     }
 
-    pub fn session_token_client(&self) -> (BigUint, BigUint) {
-        let a = BigUint::new(vec![self._rng.lock().unwrap().gen()]);
+    pub fn session_token_client(&self, rng: &mut ThreadRng) -> (BigUint, BigUint) {
+        let a = BigUint::new(vec![rng.gen()]);
         (a.clone(), self._g.modpow(&a, &self._n))
     }
 
-    pub fn session_token_server(&self) -> (BigUint, BigUint) {
-        let b = BigUint::new(vec![self._rng.lock().unwrap().gen()]);
+    pub fn session_token_server(&self, rng: &mut ThreadRng) -> (BigUint, BigUint) {
+        let b = BigUint::new(vec![rng.gen()]);
         (b.clone(), self._k.clone().mul(&self.verifier) + self._g.modpow(&b, &self._n))
     }
 
@@ -172,10 +169,10 @@ mod tests {
         let username = "test_user".to_string();
         let mut rng = rand::thread_rng();
         let pass = gen_rand_base64(40, &mut rng);
-        let srp_v = SrpVerifier::new(username, pass.clone(), rng, 2);
+        let srp_v = SrpVerifier::new(username, pass.clone(), &mut rng, 2);
 
-        let (a, _a) = srp_v.session_token_client();
-        let (b, _b) = srp_v.session_token_server();
+        let (a, _a) = srp_v.session_token_client(&mut rng);
+        let (b, _b) = srp_v.session_token_server(&mut rng);
 
         let cl_sess = srp_v.session_key_client(a, _b.clone(), pass);
         let srv_sess = srp_v.session_key_server(b, _a.clone());
