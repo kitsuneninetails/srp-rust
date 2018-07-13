@@ -42,7 +42,7 @@ impl SrpVerifier {
 
         let big_n = BigUint::from_bytes_be(n.as_bytes());
 
-        let salt_hex = pad_hex(gen_rand_bytes(16, &mut rng).as_ref());
+        let salt_hex = pad_hex(BigUint::from_bytes_be(gen_rand_bytes(16, &mut rng).as_slice()));
         let big_salt = BigUint::from_bytes_be(&salt_hex.as_bytes());
 
         let x_hex = hash_pass(user.clone(), pass, big_salt.clone());

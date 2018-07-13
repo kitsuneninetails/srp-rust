@@ -15,8 +15,8 @@ pub fn gen_rand_base64(len: usize, rng: &mut ThreadRng) -> String {
     base64::encode(bytes.as_slice())
 }
 
-pub fn pad_hex(input: &[u8]) -> HexString {
-    let hash_str: HexString = input.into();
+pub fn pad_hex(input: BigUint) -> HexString {
+    let hash_str = HexString::from(input.to_bytes_be());
     if hash_str.len() % 2 == 1 {
         HexString(format!("0{}", hash_str.0.to_ascii_lowercase()))
     } else if hash_str.len() > 0 &&
