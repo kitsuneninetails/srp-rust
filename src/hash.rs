@@ -33,17 +33,19 @@ pub fn rpad_string(hstr: HexString, pad_len: usize, pad_char: char) -> HexString
     HexString(format!("{}{}", pad_char.to_string().repeat(num_pad), hstr))
 }
 
-pub fn hash(input: Vec<&[u8]>) -> HexString {
+pub fn hash(input: Vec<&[u8]>) -> Vec<u8> {
     let mut full_vec = Vec::new();
     for v in input.iter() {
         full_vec.extend_from_slice(v);
     }
-    rpad_string(HexString(Sha256::digest(full_vec.as_slice()).to_hex()), 64, '0')
+    rpad_string(HexString(Sha256::digest(full_vec.as_slice()).to_hex()), 64, '0').from_hex().unwrap()
 }
 
-pub fn hash_pass(user: String, pass: String, salt: BigUint) -> HexString {
-    let up_hash_hex = hash(vec![user.as_bytes(), ":".as_bytes(), pass.as_bytes()]);
-    let salt_up_hash_hex = HexString(format!("{}{}", HexString::from(salt.to_bytes_be()), up_hash_hex));
-    hash(vec![salt_up_hash_hex.from_hex().unwrap_or(vec![]).as_slice()])
+pub fn hash_pass(user: String, pass: String, salt: BigUint) -> Vec<u8> {
+    let up_hash = hash(vec![user.as_bytes(), ":".as_bytes(), pass.as_bytes()]);
+    let mut salt_up_hash = Vec::new();
+    salt_up_hash.extend_from_slice(salt.to_bytes_be().as_slice());
+    salt_up_hash.extend_from_slice(up_hash.as_slice());
+    hash(vec![salt_up_hash.as_slice()])
 }
 

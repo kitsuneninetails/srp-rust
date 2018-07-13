@@ -14,6 +14,7 @@ use hash::*;
 use hex_string::HexString;
 use num_bigint::BigUint;
 use rand::{ThreadRng, Rng};
+use rustc_serialize::hex::FromHex;
 use std::ops::{Mul, Sub, Add};
 use std::sync::{Arc, Mutex};
 
@@ -40,20 +41,20 @@ impl SrpVerifier {
              18437913a8c39c3dd0d4ca3c500b885f
              e3".into());
 
-        let big_n = BigUint::from_bytes_be(n.as_bytes());
+        let big_n = BigUint::from_bytes_be(n.from_hex().unwrap().as_slice());
 
         let salt_hex = pad_hex(BigUint::from_bytes_be(gen_rand_bytes(16, &mut rng).as_slice()));
-        let big_salt = BigUint::from_bytes_be(&salt_hex.as_bytes());
+        let big_salt = BigUint::from_bytes_be(salt_hex.from_hex().unwrap().as_slice());
 
-        let x_hex = hash_pass(user.clone(), pass, big_salt.clone());
-        let big_x = BigUint::from_bytes_be(x_hex.as_bytes());
+        let x_hash = hash_pass(user.clone(), pass, big_salt.clone());
+        let big_x = BigUint::from_bytes_be(x_hash.as_slice());
 
         let big_g = BigUint::new(vec![g]);
 
         let big_v: BigUint = big_g.modpow(&big_x, &big_n);
 
-        let k_hex = hash(vec![big_n.to_bytes_be().as_slice(), big_g.to_bytes_be().as_slice()]);
-        let big_k = BigUint::from_bytes_be(k_hex.as_bytes());
+        let k_hash = hash(vec![big_n.to_bytes_be().as_slice(), big_g.to_bytes_be().as_slice()]);
+        let big_k = BigUint::from_bytes_be(k_hash.as_slice());
 
         SrpVerifier {
             username: user,
@@ -79,10 +80,10 @@ impl SrpVerifier {
     pub fn session_key_client(&self, a: BigUint, _b: BigUint, pass: String) -> SrpSession {
         let _a = self._g.modpow(&a, &self._n);
 
-        let u = BigUint::from_bytes_be(hash(vec![_a.to_bytes_be().as_slice(), _b.to_bytes_be().as_slice()]).as_bytes());
+        let u = BigUint::from_bytes_be(hash(vec![_a.to_bytes_be().as_slice(), _b.to_bytes_be().as_slice()]).as_slice());
 
-        let x_hex = hash_pass(self.username.clone(), pass, self.salt.clone());
-        let big_x = BigUint::from_bytes_be(x_hex.as_bytes());
+        let x_hash = hash_pass(self.username.clone(), pass, self.salt.clone());
+        let big_x = BigUint::from_bytes_be(x_hash.as_slice());
 
         let s_c1 = self._g.modpow(&big_x, &self._n);
         let s_c2 = self._k.clone().mul(&s_c1);
@@ -91,7 +92,7 @@ impl SrpVerifier {
         let s_c5 = a.clone().add(&s_c4);
         let s_c = s_c3.modpow(&s_c5, &self._n);
 
-        let k_c = BigUint::from_bytes_be(hash(vec![s_c.to_bytes_be().as_slice()]).as_bytes());
+        let k_c = BigUint::from_bytes_be(hash(vec![s_c.to_bytes_be().as_slice()]).as_slice());
 
         SrpSession {
             pub_token: _a,
@@ -103,13 +104,13 @@ impl SrpVerifier {
     pub fn session_key_server(&self, b: BigUint, _a: BigUint) -> SrpSession {
         let _b = self._k.clone().mul(&self.verifier) + self._g.modpow(&b, &self._n);
 
-        let u = BigUint::from_bytes_be(hash(vec![_a.to_bytes_be().as_slice(), _b.to_bytes_be().as_slice()]).as_bytes());
+        let u = BigUint::from_bytes_be(hash(vec![_a.to_bytes_be().as_slice(), _b.to_bytes_be().as_slice()]).as_slice());
 
         let s_s1 = self.verifier.modpow(&u, &self._n);
         let s_s2 = _a.clone().mul(&s_s1);
         let s_s = s_s2.modpow(&b, &self._n);
 
-        let k_s = BigUint::from_bytes_be(hash(vec![s_s.to_bytes_be().as_slice()]).as_bytes());
+        let k_s = BigUint::from_bytes_be(hash(vec![s_s.to_bytes_be().as_slice()]).as_slice());
 
         SrpSession {
             pub_token: _b,
@@ -130,21 +131,21 @@ impl SrpSession {
         BigUint::from_bytes_be(
             hash(vec![self.pub_token.to_bytes_be().as_slice(),
                       srv_token.to_bytes_be().as_slice(),
-                      self.session_key.to_bytes_be().as_slice()]).as_bytes())
+                      self.session_key.to_bytes_be().as_slice()]).as_slice())
     }
 
     pub fn gen_server_proof(&self, cl_token: BigUint, cl_proof: BigUint) -> BigUint {
         BigUint::from_bytes_be(
             hash(vec![cl_token.to_bytes_be().as_slice(),
                       cl_proof.to_bytes_be().as_slice(),
-                      self.session_key.to_bytes_be().as_slice()]).as_bytes())
+                      self.session_key.to_bytes_be().as_slice()]).as_slice())
     }
 
     pub fn verify_client_proof(&self, cl_token: BigUint, cl_proof: BigUint) -> bool {
         let srv_proof = BigUint::from_bytes_be(
             hash(vec![cl_token.to_bytes_be().as_slice(),
                       self.pub_token.to_bytes_be().as_slice(),
-                      self.session_key.to_bytes_be().as_slice()]).as_bytes());
+                      self.session_key.to_bytes_be().as_slice()]).as_slice());
         srv_proof == cl_proof
     }
 
@@ -152,12 +153,12 @@ impl SrpSession {
         let orig_cl_proof = BigUint::from_bytes_be(
             hash(vec![self.pub_token.to_bytes_be().as_slice(),
                       srv_token.to_bytes_be().as_slice(),
-                      self.session_key.to_bytes_be().as_slice()]).as_bytes());
+                      self.session_key.to_bytes_be().as_slice()]).as_slice());
 
         let cl_proof = BigUint::from_bytes_be(
             hash(vec![self.pub_token.to_bytes_be().as_slice(),
                       orig_cl_proof.to_bytes_be().as_slice(),
-                      self.session_key.to_bytes_be().as_slice()]).as_bytes());
+                      self.session_key.to_bytes_be().as_slice()]).as_slice());
         srv_proof == cl_proof
     }
 }
