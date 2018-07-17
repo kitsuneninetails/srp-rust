@@ -64,101 +64,190 @@ impl SrpVerifier {
         }
     }
 
-    pub fn session_token_client(&self, rng: &mut ThreadRng) -> (BigUint, BigUint) {
+    pub fn new_client(&self, rng: &mut ThreadRng) -> SrpClient {
         let a = BigUint::new(vec![rng.gen()]);
-        (a.clone(), self._g.modpow(&a, &self._n))
-    }
-
-    pub fn session_token_server(&self, rng: &mut ThreadRng) -> (BigUint, BigUint) {
-        let b = BigUint::new(vec![rng.gen()]);
-        (b.clone(), self._k.clone().mul(&self.verifier) + self._g.modpow(&b, &self._n))
-    }
-
-    pub fn session_key_client(&self, a: BigUint, _b: BigUint, pass: String) -> SrpSession {
+        // A = g^a
         let _a = self._g.modpow(&a, &self._n);
+        SrpClient::new(_a,
+                       a,
+                       self.username.clone(),
+                       self.salt.clone(),
+                       self._k.clone(),
+                       self._g.clone(),
+                       self._n.clone())
+    }
 
-        let u = BigUint::from_bytes_be(hash(vec![_a.to_bytes_be().as_slice(), _b.to_bytes_be().as_slice()]).as_slice());
+    pub fn new_server(&self, rng: &mut ThreadRng) -> SrpServer {
+        let b = BigUint::new(vec![rng.gen()]);
+        // B = k*v + g^b
+        let _b = self._k.clone().mul(&self.verifier) + self._g.modpow(&b, &self._n);
+        SrpServer::new(_b,
+                       b,
+                       self.verifier.clone(),
+                       self._n.clone())
+    }
+}
 
+pub struct SrpClient {
+    local_token: BigUint,
+    pub pub_token: BigUint,
+    username: String,
+    salt: BigUint,
+    k: BigUint,
+    g: BigUint,
+    _n: BigUint,
+}
+
+impl SrpClient {
+    pub fn new(pub_token: BigUint,
+               local_token: BigUint,
+               username: String,
+               salt: BigUint,
+               k: BigUint,
+               g: BigUint,
+               _n: BigUint) -> Self {
+        SrpClient {
+            pub_token,
+            local_token,
+            username,
+            salt,
+            k,
+            g,
+            _n
+        }
+    }
+
+    pub fn new_session(&self, srv_pub_tkn: BigUint, pass: String) -> SrpClientSession {
+        // u = H(A|B)
+        let u = BigUint::from_bytes_be(hash(vec![self.pub_token.to_bytes_be().as_slice(),
+                                                 srv_pub_tkn.to_bytes_be().as_slice()]).as_slice());
+
+        // x = H(H(s)|U|":"|P)
         let x_hash = hash_pass(self.username.clone(), pass, self.salt.clone());
-        let big_x = BigUint::from_bytes_be(x_hash.as_slice());
+        let x = BigUint::from_bytes_be(x_hash.as_slice());
 
-        let s_c1 = self._g.modpow(&big_x, &self._n);
-        let s_c2 = self._k.clone().mul(&s_c1);
-        let s_c3 = _b.clone().sub(&s_c2);
-        let s_c4 = u.clone().mul(&big_x);
-        let s_c5 = a.clone().add(&s_c4);
+        // g^x
+        let s_c1 = self.g.modpow(&x, &self._n);
+        // k*g^x
+        let s_c2 = self.k.clone().mul(&s_c1);
+        // B - (k*g^x)
+        let s_c3 = srv_pub_tkn.clone().sub(&s_c2);
+        // u * x
+        let s_c4 = u.clone().mul(&x);
+        // a + (H(A|B) * H(U|P|s))
+        let s_c5 = self.local_token.clone().add(&s_c4);
+        // (B - (k*g^x))^(a + (u * x))
         let s_c = s_c3.modpow(&s_c5, &self._n);
 
-        let k_c = BigUint::from_bytes_be(hash(vec![s_c.to_bytes_be().as_slice()]).as_slice());
-
-        SrpSession {
-            pub_token: _a,
-            local_token: a,
-            session_key: k_c
-        }
-    }
-
-    pub fn session_key_server(&self, b: BigUint, _a: BigUint) -> SrpSession {
-        let _b = self._k.clone().mul(&self.verifier) + self._g.modpow(&b, &self._n);
-
-        let u = BigUint::from_bytes_be(hash(vec![_a.to_bytes_be().as_slice(), _b.to_bytes_be().as_slice()]).as_slice());
-
-        let s_s1 = self.verifier.modpow(&u, &self._n);
-        let s_s2 = _a.clone().mul(&s_s1);
-        let s_s = s_s2.modpow(&b, &self._n);
-
-        let k_s = BigUint::from_bytes_be(hash(vec![s_s.to_bytes_be().as_slice()]).as_slice());
-
-        SrpSession {
-            pub_token: _b,
-            local_token: b,
-            session_key: k_s
-        }
+        SrpClientSession::new(BigUint::from_bytes_be(hash(vec![s_c.to_bytes_be().as_slice()]).as_slice()),
+                              self.pub_token.clone(),
+                              srv_pub_tkn)
     }
 }
 
-pub struct SrpSession {
-    pub session_key: BigUint,
-    pub local_token: BigUint,
-    pub pub_token: BigUint
+pub struct SrpClientSession {
+    session_key: BigUint,
+    pub_token: BigUint,
+    server_pub_token: BigUint,
 }
 
-impl SrpSession {
-    pub fn gen_client_proof(&self, srv_token: BigUint) -> BigUint {
+impl SrpClientSession {
+    pub fn new(session_key: BigUint, pub_token: BigUint, server_pub_token: BigUint) -> Self {
+        SrpClientSession {
+            session_key,
+            pub_token,
+            server_pub_token,
+        }
+    }
+
+    pub fn gen_check(&self) -> BigUint {
         BigUint::from_bytes_be(
             hash(vec![self.pub_token.to_bytes_be().as_slice(),
-                      srv_token.to_bytes_be().as_slice(),
+                      self.server_pub_token.to_bytes_be().as_slice(),
                       self.session_key.to_bytes_be().as_slice()]).as_slice())
     }
 
-    pub fn gen_server_proof(&self, cl_token: BigUint, cl_proof: BigUint) -> BigUint {
+    pub fn verify_check(&self, check_value: BigUint) -> bool {
+        let exp_srv_check = BigUint::from_bytes_be(
+            hash(vec![self.pub_token.to_bytes_be().as_slice(),
+                      self.gen_check().to_bytes_be().as_slice(),
+                      self.session_key.to_bytes_be().as_slice()]).as_slice());
+        check_value == exp_srv_check
+    }
+}
+
+pub struct SrpServer {
+    local_token: BigUint,
+    pub pub_token: BigUint,
+    verifier: BigUint,
+    _n: BigUint,
+}
+
+impl SrpServer {
+    pub fn new(pub_token: BigUint,
+               local_token: BigUint,
+               verifier: BigUint,
+               _n: BigUint) -> Self {
+        SrpServer {
+            pub_token,
+            local_token,
+            verifier,
+            _n
+        }
+    }
+
+    pub fn new_session(&self, cl_pub_token: BigUint) -> SrpServerSession {
+        // u = H(A|B)
+        let u = BigUint::from_bytes_be(hash(vec![cl_pub_token.to_bytes_be().as_slice(),
+                                                 self.pub_token.to_bytes_be().as_slice()]).as_slice());
+
+        // v^u
+        let s_s1 = self.verifier.modpow(&u, &self._n);
+        // A * v^u
+        let s_s2 = cl_pub_token.clone().mul(&s_s1);
+        // (A * v^u)^b
+        let s_s = s_s2.modpow(&self.local_token, &self._n);
+
+        SrpServerSession::new(BigUint::from_bytes_be(hash(vec![s_s.to_bytes_be().as_slice()]).as_slice()),
+                              self.pub_token.clone(),
+                              cl_pub_token)
+    }
+}
+
+pub struct SrpServerSession {
+    session_key: BigUint,
+    client_pub_token: BigUint,
+    pub_token: BigUint,
+}
+
+impl SrpServerSession {
+    pub fn new(session_key: BigUint,
+               pub_token: BigUint,
+               client_pub_token: BigUint) -> Self {
+        SrpServerSession {
+            session_key,
+            pub_token,
+            client_pub_token
+        }
+    }
+
+    pub fn gen_check(&self, client_check: BigUint) -> BigUint {
         BigUint::from_bytes_be(
-            hash(vec![cl_token.to_bytes_be().as_slice(),
-                      cl_proof.to_bytes_be().as_slice(),
+            hash(vec![self.client_pub_token.to_bytes_be().as_slice(),
+                      client_check.to_bytes_be().as_slice(),
                       self.session_key.to_bytes_be().as_slice()]).as_slice())
     }
 
-    pub fn verify_client_proof(&self, cl_token: BigUint, cl_proof: BigUint) -> bool {
-        let srv_proof = BigUint::from_bytes_be(
-            hash(vec![cl_token.to_bytes_be().as_slice(),
+    pub fn verify_check(&self, check_val: BigUint) -> bool {
+        let exp_srv_check = BigUint::from_bytes_be(
+            hash(vec![self.client_pub_token.to_bytes_be().as_slice(),
                       self.pub_token.to_bytes_be().as_slice(),
                       self.session_key.to_bytes_be().as_slice()]).as_slice());
-        srv_proof == cl_proof
+        exp_srv_check == check_val
     }
 
-    pub fn verify_server_proof(&self, srv_token: BigUint, srv_proof: BigUint) -> bool {
-        let orig_cl_proof = BigUint::from_bytes_be(
-            hash(vec![self.pub_token.to_bytes_be().as_slice(),
-                      srv_token.to_bytes_be().as_slice(),
-                      self.session_key.to_bytes_be().as_slice()]).as_slice());
-
-        let cl_proof = BigUint::from_bytes_be(
-            hash(vec![self.pub_token.to_bytes_be().as_slice(),
-                      orig_cl_proof.to_bytes_be().as_slice(),
-                      self.session_key.to_bytes_be().as_slice()]).as_slice());
-        srv_proof == cl_proof
-    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -168,22 +257,25 @@ mod tests {
     fn test_gen_verify() {
         let username = "test_user".to_string();
         let mut rng = rand::thread_rng();
-        let pass = gen_rand_base64(40, &mut rng);
+        let pass = "testPass".to_string();
         let srp_v = SrpVerifier::new(username, pass.clone(), &mut rng, 2);
 
-        let (a, _a) = srp_v.session_token_client(&mut rng);
-        let (b, _b) = srp_v.session_token_server(&mut rng);
+        let srp_cl = srp_v.new_client(&mut rng);
+        let srp_srv = srp_v.new_server(&mut rng);
 
-        let cl_sess = srp_v.session_key_client(a, _b.clone(), pass);
-        let srv_sess = srp_v.session_key_server(b, _a.clone());
+        println!("client token = {}", srp_cl.pub_token);
+        println!("serv token = {}", srp_srv.pub_token);
 
-        let cl_proof = cl_sess.gen_client_proof(_b.clone());
+        let cl_sess = srp_cl.new_session(srp_srv.pub_token.clone(), pass);
+        let srv_sess = srp_srv.new_session(srp_cl.pub_token.clone());
 
-        assert!(srv_sess.verify_client_proof(_a.clone(), cl_proof.clone()));
+        let cl_proof = cl_sess.gen_check();
 
-        let srv_proof = srv_sess.gen_server_proof(_a, cl_proof);
+        assert!(srv_sess.verify_check(cl_proof.clone()));
 
-        assert!(cl_sess.verify_server_proof(_b, srv_proof));
+        let srv_proof = srv_sess.gen_check(cl_proof);
+
+        assert!(cl_sess.verify_check(srv_proof));
 
     }
 }
